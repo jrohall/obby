@@ -2094,8 +2094,9 @@ class TaskModal extends Modal {
         if (this.existingTask?.dueTime) timeInput.value = this.existingTask.dueTime;
         // Always show the calendar picker on click or focus (if supported)
         const showCalendarPicker = (e: Event) => {
-            if (dateInput.showPicker) {
-                dateInput.showPicker();
+            const input = dateInput as HTMLInputElement & { showPicker?: () => void };
+            if (input.showPicker) {
+                input.showPicker();
             }
         };
         dateInput.addEventListener('click', showCalendarPicker);
