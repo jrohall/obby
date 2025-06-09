@@ -6,3 +6,642 @@ available in the app when your plugin is enabled.
 If your plugin does not need CSS, delete this file.
 
 */
+
+/* General line style */
+:root {
+    --obby-calendar-line-style: solid;
+    --obby-calendar-line-width: 1px; /* Define line width here */
+}
+
+/* Light theme line colors */
+.theme-light {
+    --obby-calendar-line-color: #cccccc;       /* Light gray for main lines */
+    --obby-calendar-minor-line-color: #dddddd; /* Very light gray for minor lines */
+    --obby-calendar-today-bg: #f0f0f0;      /* Very light gray for today highlight in light mode */
+}
+
+/* Dark theme line colors */
+.theme-dark {
+    --obby-calendar-line-color: #2e2e2e;       /* User adjusted: Medium-dark gray for main lines */
+    --obby-calendar-minor-line-color: #262626; /* User adjusted: Dark gray for minor lines */
+    --obby-calendar-today-bg: #0f0f0f;      /* Adjusted dark gray for today highlight in dark mode */
+}
+
+/* --- Global Table Behavior for Crisp Lines --- */
+.fc table { /* Target all tables within FullCalendar for consistent border behavior */
+    border-collapse: collapse !important;
+    border-spacing: 0 !important;
+}
+
+/* Horizontal lines in timegrid views (week/day) */
+.fc .fc-timegrid-slot-lane {
+    border-bottom-color: var(--obby-calendar-line-color) !important;
+    border-bottom-style: var(--obby-calendar-line-style) !important;
+    border-bottom-width: var(--obby-calendar-line-width) !important;
+}
+
+/* For vertical day separators in timegrid views */
+.fc .fc-timegrid-col.fc-day,
+.fc-timegrid-cols > table > tbody > tr > td {
+    border-left-color: var(--obby-calendar-line-color) !important;
+    border-left-style: var(--obby-calendar-line-style) !important;
+    border-left-width: var(--obby-calendar-line-width) !important;
+}
+
+/* Ensure the very first vertical line is also styled if it's a direct child */
+.fc-timegrid-cols > table > tbody > tr > td:first-child {
+    border-left-color: var(--obby-calendar-line-color) !important;
+    border-left-style: var(--obby-calendar-line-style) !important;
+    border-left-width: var(--obby-calendar-line-width) !important;
+}
+
+/* For lines in month view (day grid cells) */
+/* .fc .fc-daygrid-day-frame { // This rule was moved and refined below
+    border-color: var(--obby-calendar-line-color) !important;
+    border-style: var(--obby-calendar-line-style) !important;
+    border-width: var(--obby-calendar-line-width) !important;
+} */
+
+/* Borders for table headers (th) and general data cells (td) */
+.fc th, 
+.fc td  {
+    border-color: var(--obby-calendar-line-color) !important;
+    border-style: var(--obby-calendar-line-style) !important; 
+    border-width: var(--obby-calendar-line-width) !important; 
+    box-shadow: none !important; /* Ensure no shadow on cells */
+}
+
+/* Remove border from the day number container in month view */
+.fc .fc-daygrid-day-top {
+    border: none !important; /* Remove the box around the day number */
+    /* Padding for the day number itself is handled by .fc-daygrid-day-number */
+}
+
+/* All-day section wrapper - ensure no border or shadow */
+.fc-timegrid-all-day-section {
+    border-width: 0 !important;
+    border-bottom-width: 0 !important; /* Explicitly no bottom border on the row itself */
+    box-shadow: none !important;
+}
+
+/* Cells within the all-day section - explicitly no bottom border */
+.fc-timegrid-all-day-section td {
+    border-bottom-width: 0 !important;
+}
+
+/* Borders for the all-day frame itself - set to zero, let internal cells define grid */
+.fc .fc-timegrid-all-day-frame {
+    border-width: 0 !important;
+    box-shadow: none !important;
+    /* padding: 0; */ /* Consider if padding is causing issues, but usually not for border thickness */
+}
+
+/* Inner frame for daygrid cells in month view - remove its border, let td handle it */
+.fc .fc-daygrid-day-frame {
+    border-width: 0 !important; /* Key change: No border on the inner frame */
+    box-shadow: none !important; /* Ensure no shadow here either */
+    /* The .fc td rule will provide the 1px border for the cell itself, 
+       and border-collapse on the table will make them look like a grid. */
+}
+
+/* Ensure the direct wrapper of the timed slots has no top border or shadow */
+.fc .fc-timegrid-body {
+    border-top-width: 0 !important;
+    box-shadow: none !important;
+}
+
+/* Hide FullCalendar's potential default divider between all-day and timed slots */
+.fc .fc-timegrid-divider {
+    display: none !important;
+}
+
+/* This rule defines the 1px line UNDER the all-day section (which is the top border of the timed slots area) */
+.fc .fc-timegrid-slots table { /* Using a slightly more general selector for the slots table */
+    /* border-collapse and border-spacing are handled by the global .fc table rule now */
+    border-top-color: var(--obby-calendar-line-color) !important;
+    border-top-style: var(--obby-calendar-line-style) !important;
+    border-top-width: var(--obby-calendar-line-width) !important; /* This is THE 1px line */
+    /* Ensure no other borders from this table element interfere */
+    border-left-width: 0 !important;
+    border-right-width: 0 !important;
+    border-bottom-width: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important; /* Remove any padding */
+    margin: 0 !important; /* Remove any margin */
+}
+
+/* For the vertical line of the time axis */
+.fc .fc-timegrid-axis-frame {
+    border-right-color: var(--obby-calendar-line-color) !important;
+    border-right-style: var(--obby-calendar-line-style) !important;
+    border-right-width: var(--obby-calendar-line-width) !important;
+    box-shadow: none !important; /* Added for robustness */
+}
+
+/* Borders for the day headers in timeGrid and dayGrid views */
+.fc .fc-col-header-cell {
+    border-color: var(--obby-calendar-line-color) !important;
+    border-style: var(--obby-calendar-line-style) !important;
+    border-top-width: var(--obby-calendar-line-width) !important;
+    border-bottom-width: var(--obby-calendar-line-width) !important;
+    border-left-width: var(--obby-calendar-line-width) !important;
+    border-right-width: var(--obby-calendar-line-width) !important;
+    box-shadow: none !important; /* Added for robustness */
+}
+
+/* Main calendar container border */
+.fc .fc-scrollgrid { /* Main scrolling container */
+    /* border-collapse and border-spacing for tables inside are handled by the global .fc table rule */
+    border-color: var(--obby-calendar-line-color) !important;
+    border-style: var(--obby-calendar-line-style) !important;
+    border-top-width: var(--obby-calendar-line-width) !important;
+    border-bottom-width: var(--obby-calendar-line-width) !important;
+    border-left-width: var(--obby-calendar-line-width) !important;
+    border-right-width: var(--obby-calendar-line-width) !important;
+    box-shadow: none !important; /* Added for robustness */
+}
+
+/* If using minor_lines, style them too */
+.fc .fc-timegrid-slot-minor {
+    border-bottom-style: var(--obby-calendar-line-style) !important;
+    border-bottom-color: var(--obby-calendar-minor-line-color) !important;
+    border-bottom-width: var(--obby-calendar-line-width) !important;
+}
+
+/* --- Comprehensive Event Border Removal --- */
+
+/* General event containers */
+.fc-event,
+.fc-daygrid-event,
+.fc-timegrid-event,
+.fc-list-event {
+    border: none !important;
+    border-width: 0 !important;
+    outline: none !important; /* Also remove outline which can look like a border */
+    box-shadow: none !important; /* Remove box-shadow which can also mimic a border */
+}
+
+/* Inner elements of events that might have their own borders */
+.fc-event .fc-event-main,
+.fc-daygrid-event .fc-event-main,
+.fc-timegrid-event .fc-event-main,
+.fc-list-event .fc-event-main,
+.fc-event .fc-event-main-frame,
+.fc-daygrid-event .fc-event-main-frame,
+.fc-timegrid-event .fc-event-main-frame,
+.fc-list-event .fc-event-main-frame {
+    border: none !important;
+    border-width: 0 !important;
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+/* Specific parts like event resizers if they have borders */
+.fc-event .fc-event-resizer {
+    border: none !important;
+    border-width: 0 !important;
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+/* Style for calendar column headers (day headers) */
+.fc .fc-col-header-cell-cushion {
+    font-weight: bold !important;
+    color: var(--text-normal) !important; /* Use Obsidian's default text color */
+    text-decoration: none !important; /* Remove underline */
+}
+
+/* --- Comprehensive Today Highlight Styling --- */
+
+/* General today cell in any view */
+.fc .fc-day-today {
+    background: var(--obby-calendar-today-bg) !important; /* Reset entire background */
+    background-color: var(--obby-calendar-today-bg) !important; /* Be explicit */
+}
+
+/* Specifically for daygrid cells (month view) */
+.fc-daygrid-day.fc-day-today .fc-daygrid-day-frame,
+.fc-daygrid-day.fc-day-today {
+    background: var(--obby-calendar-today-bg) !important;
+    background-color: var(--obby-calendar-today-bg) !important;
+}
+
+/* Specifically for timegrid columns (week/day views) */
+/* Note: This styles the entire column. If a more specific inner element is used for the day background, that also needs targeting. */
+.fc-timegrid-col.fc-day-today {
+    background: var(--obby-calendar-today-bg) !important;
+    background-color: var(--obby-calendar-today-bg) !important;
+}
+
+/* FullCalendar sometimes uses a .fc-highlight class for emphasis, which might apply to today */
+.fc .fc-highlight {
+    background: var(--obby-calendar-today-bg) !important;
+    background-color: var(--obby-calendar-today-bg) !important;
+    /* If fc-highlight is used for other things like selection, this might be too broad.
+       However, for troubleshooting the yellow 'today' highlight, it's worth trying. */
+}
+
+/* --- Toolbar Button Styling --- */
+
+/* General style for all FullCalendar buttons */
+.fc .fc-button {
+    background-color: var(--interactive-normal) !important; /* Standard button background */
+    color: var(--text-on-interactive) !important; /* Text color for buttons */
+    border: 1px solid var(--background-modifier-border) !important; /* Subtle border */
+    border-radius: 0 !important; /* Default to square corners for grouped effect */
+    padding: 6px 12px !important; /* Standard padding */
+    font-size: var(--font-ui-small) !important; /* Match UI font size */
+    font-weight: normal !important; /* Ensure normal font weight */
+    box-shadow: none !important; /* Remove any default FullCalendar shadows */
+    text-transform: none !important; /* Ensure no uppercase transform by default */
+    transition: background-color 0.1s ease-in-out; /* Smooth hover transition */
+    text-align: center !important; /* Ensure horizontal centering for non-flex fallback */
+    /* Flexbox for robust vertical and horizontal centering */
+    display: inline-flex !important;
+    align-items: center !important; /* Vertical center */
+    justify-content: center !important; /* Horizontal center */
+    line-height: normal !important; /* Reset line-height if it interferes */
+}
+
+/* Rounded corners for the first button in a group */
+.fc .fc-button-group > .fc-button:first-child {
+    border-top-left-radius: var(--radius-s) !important;
+    border-bottom-left-radius: var(--radius-s) !important;
+}
+
+/* Rounded corners for the last button in a group */
+.fc .fc-button-group > .fc-button:last-child {
+    border-top-right-radius: var(--radius-s) !important;
+    border-bottom-right-radius: var(--radius-s) !important;
+}
+
+/* Fully rounded corners for the standalone 'today' button */
+.fc .fc-today-button {
+    border-radius: var(--radius-s) !important;
+}
+
+/* Fully rounded corners for a button that is the only one in its group */
+.fc .fc-button-group > .fc-button:only-child {
+    border-radius: var(--radius-s) !important;
+}
+
+/* Override FullCalendar's primary button blue (often applied to 'today') */
+.fc .fc-button-primary {
+    background-color: var(--interactive-normal) !important;
+    border-color: var(--background-modifier-border) !important;
+    color: var(--text-on-interactive) !important;
+}
+
+/* Hover state for buttons */
+.fc .fc-button:hover,
+.fc .fc-button-primary:hover {
+    background-color: var(--interactive-hover) !important;
+}
+
+/* Active state for buttons (e.g., selected view, or when 'today' is active) */
+.fc .fc-button-primary.fc-button-active,
+.fc .fc-button.fc-button-active { /* fc-button-active is used for view switchers */
+    background-color: var(--interactive-accent) !important;
+    color: var(--text-on-accent) !important;
+    border-color: var(--interactive-accent-hover) !important; /* Slightly darker border for active */
+}
+
+/* Disabled state for buttons (e.g., prev/next at start/end of range) */
+.fc .fc-button:disabled,
+.fc .fc-button-primary:disabled {
+    background-color: var(--background-secondary) !important; /* Muted background */
+    color: var(--text-faint) !important; /* Muted text */
+    border-color: var(--background-modifier-border) !important;
+    opacity: 0.7 !important;
+}
+
+/* --- List View Header Styling --- */
+.fc-list-table th, /* Target the table header cells in list view */
+.fc-list-day-cushion /* Target the cushion element that often has the background and text */ {
+    background-color: transparent !important; /* Remove white background */
+    color: var(--text-normal) !important; /* Match theme text color */
+    font-weight: bold !important; /* Make text bold */
+    text-decoration: none !important; /* Remove underline */
+}
+
+/* Ensure links within the list day cushion also inherit styling and have no underline */
+.fc-list-day-cushion a {
+    color: inherit !important; /* Inherit color from parent (.fc-list-day-cushion) */
+    text-decoration: none !important; /* Remove underline specifically from links */
+    font-weight: inherit !important; /* Ensure boldness is inherited if applicable */
+}
+
+/* --- Month View Specific Styling --- */
+
+/* Day numbers in month view */
+.fc-daygrid-day-number {
+    padding: 4px 6px !important; /* Adjust padding for spacing */
+    color: var(--text-normal) !important; /* Use theme's normal text color */
+    font-size: var(--font-ui-small) !important;
+    text-decoration: none !important; /* Remove underline */
+}
+
+/* Events in month view - general container for styling dot and text alignment */
+.fc-daygrid-event-harness {
+    margin-top: 1px !important; /* Small space between events */
+}
+
+/* Dot before events in month view */
+.fc-daygrid-event-dot {
+    border-color: var(--interactive-accent) !important; /* Use accent color for the dot */
+    /* Ensure dot is visible, FullCalendar might make it small by default */
+    border-width: 3px !important; /* Make dot a bit more prominent if default is too small */
+    margin-right: 5px !important; /* Space between dot and event title */
+}
+
+/* Event titles in month view */
+.fc-daygrid-event .fc-event-title {
+    color: var(--text-normal) !important; /* Theme's normal text color for event titles */
+    font-size: var(--font-ui-smaller) !important; /* Slightly smaller font for events in month view */
+    white-space: nowrap !important; /* Prevent event titles from wrapping ugly */
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+
+/* Styling for the '+X more' link in month view */
+.fc-daygrid-more-link {
+    color: var(--text-muted) !important; /* Muted color for the more link */
+    font-size: var(--font-ui-smaller) !important;
+    text-decoration: none !important;
+    padding: 2px 4px !important;
+    display: inline-block !important; /* Allow padding and better click target */
+}
+
+.fc-daygrid-more-link:hover {
+    color: var(--text-normal) !important;
+    background-color: var(--background-modifier-hover) !important;
+    border-radius: var(--radius-s) !important;
+}
+
+/* --- List View Outer Border --- */
+.fc-list { /* This is often the main table or container for the list items */
+    border-color: var(--obby-calendar-line-color) !important;
+    border-style: var(--obby-calendar-line-style) !important;
+    border-width: var(--obby-calendar-line-width) !important;
+    box-shadow: none !important; /* Ensure no shadow */
+    table-layout: fixed !important; /* Use fixed table layout for predictable column widths */
+    width: 100% !important; /* Ensure table takes full available width */
+}
+
+/* If the list view has a different top-level container that shows a border */
+.fc-list-view { /* This is the top-level view container */
+    border-color: var(--obby-calendar-line-color) !important;
+    border-style: var(--obby-calendar-line-style) !important;
+    border-width: var(--obby-calendar-line-width) !important;
+    box-shadow: none !important; /* Ensure no shadow */
+}
+
+/* --- List View Event Row Alignment --- */
+
+/* Agenda list view: make each event row a true table row */
+.fc-list-event {
+    display: table-row !important;
+}
+
+/* Dot column: move to the first position */
+.fc-list-event td.fc-list-event-graphic {
+    order: 1 !important;
+    width: 24px !important;
+    min-width: 24px !important;
+    max-width: 24px !important;
+    text-align: center !important;
+    justify-content: center !important;
+    padding: 0 !important;
+    vertical-align: middle !important;
+    text-align: center !important;
+    display: table-cell !important;
+}
+
+/* Time column: move to the second position */
+.fc-list-event td.fc-list-event-time {
+    order: 2 !important;
+    width: 120px !important;
+    color: var(--text-normal) !important;
+    padding: 8px 10px !important;
+    text-align: left !important;
+}
+
+/* Title column: keep in third position */
+.fc-list-event td.fc-list-event-title {
+    order: 3 !important;
+    width: auto !important;
+    color: var(--text-normal) !important;
+    padding: 8px 10px !important;
+}
+
+
+/* Style the actual dot span for better control and alignment */
+.fc-list-event span.fc-list-event-dot {
+    display: inline-block !important;
+    width: 1px !important;
+    height: 1px !important;
+    border-radius: 50% !important;
+    vertical-align: middle !important;
+    margin-right: 0 !important;
+}
+
+/* Hide dot for todos */ 
+.fc-list-event.fc-event-is-todo span.fc-list-event-dot {
+    display: none !important;
+}
+
+
+/* Remove default list styling that might interfere */
+.fc-list ol, .fc-list li {
+    list-style: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+/* Tasks Sidebar Styles */
+#tasks-sidebar {
+    background-color: var(--background-primary);
+    padding: 16px;
+    overflow-y: auto;
+    z-index: 10;
+    box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
+}
+
+#tasks-sidebar h3 {
+    margin-top: 0;
+    margin-bottom: 16px;
+    color: var(--text-normal);
+}
+
+/* Calendar Container Styles */
+#calendar-container {
+    position: relative;
+    transition: all 0.3s ease;
+}
+
+/* Ensure calendar content adjusts properly */
+.fc-view-harness {
+    transition: all 0.3s ease;
+}
+
+/* Ensure the calendar grid adjusts properly */
+.fc-scrollgrid {
+    transition: all 0.3s ease;
+}
+
+/* Ensure calendar events and content adjust properly */
+.fc-view {
+    transition: all 0.3s ease;
+}
+
+/* Ensure calendar header adjusts properly */
+.fc-header-toolbar {
+    transition: all 0.3s ease;
+}
+
+/* Tasks Button in Calendar Header */
+.fc-tasks-button {
+    background-color: var(--interactive-normal) !important;
+    color: var(--text-on-interactive) !important;
+    border: 1px solid var(--background-modifier-border) !important;
+    border-radius: var(--radius-s) !important;
+    padding: 6px 12px !important;
+    font-size: var(--font-ui-small) !important;
+    font-weight: normal !important;
+    box-shadow: none !important;
+    text-transform: none !important;
+    transition: all 0.2s ease-in-out;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    line-height: normal !important;
+    margin-left: 8px !important;
+}
+
+.fc-tasks-button:hover {
+    background-color: var(--interactive-hover) !important;
+}
+
+.fc-tasks-button.active {
+    background-color: var(--interactive-accent) !important;
+    color: var(--text-on-accent) !important;
+}
+
+/* Agenda View Header Styling */
+.fc-list-day-cushion {
+    background-color: var(--background-secondary) !important;
+    color: var(--text-muted) !important;
+    padding: 8px 12px !important;
+}
+
+/* Style for current day in agenda view */
+.fc-list-day-today .fc-list-day-cushion {
+    background-color: var(--obby-calendar-today-bg) !important;
+    color: var(--text-normal) !important;
+    font-weight: bold !important;
+}
+
+/* Ensure links within the list day cushion also inherit styling and have no underline */
+.fc-list-day-cushion a {
+    color: inherit !important;
+    text-decoration: none !important;
+    font-weight: inherit !important;
+}
+
+/* Make the all-day cell for the current day match the current day column background */
+.fc-timegrid-all-day td.fc-day-today {
+  background-color: var(--obby-calendar-today-bg) !important;
+}
+
+/* Ensure the calendar icon in the date input is visible and not overlapped by text */
+.obby-task-date-input::-webkit-calendar-picker-indicator {
+  margin-left: 2px;
+  margin-right: 2px;
+  z-index: 2;
+}
+.obby-task-date-input {
+  position: relative;
+  background-color: var(--background-primary);
+}
+
+/* Hide the native calendar icon for input[type=date] */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  display: none;
+}
+input[type="date"]::-ms-clear {
+  display: none;
+}
+input[type="date"]::-ms-expand {
+  display: none;
+}
+input[type="date"]::-o-clear {
+  display: none;
+}
+input[type="date"]::-o-expand {
+  display: none;
+}
+input[type="date"]::-moz-calendar-picker-indicator {
+  opacity: 0;
+  display: none;
+}
+
+/* Prevent horizontal scroll in all-day section of week view */
+.fc-timegrid-view .fc-daygrid-body-natural .fc-daygrid-day-events,
+.fc-timegrid-view .fc-daygrid-body-liquid .fc-daygrid-day-events,
+.fc-timeGridWeek-view .fc-daygrid-body-natural .fc-daygrid-day-events,
+.fc-timeGridWeek-view .fc-daygrid-body-liquid .fc-daygrid-day-events,
+.fc-timeGridDay-view .fc-daygrid-body-natural .fc-daygrid-day-events,
+.fc-timeGridDay-view .fc-daygrid-body-liquid .fc-daygrid-day-events {
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    white-space: normal !important;
+    max-width: 100% !important;
+}
+
+/* Ensure all-day event containers and events do not force horizontal scroll */
+.fc-timegrid-view .fc-daygrid-event-harness {
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+    white-space: normal !important;
+}
+
+/* Hide todo checkbox in agenda/list view */
+.fc-list-event .obby-todo-checkbox {
+    display: none !important;
+}
+
+/* Remove vertical borders from agenda/list view rows */
+.fc-list-event td {
+    border-left: none !important;
+    border-right: none !important;
+}
+
+/* Remove left border for all events */
+.fc-event, .fc-list-event {
+    border-left: none !important;
+}
+
+/* For todos/tasks, use the todo folder color variable for a 5px left border */
+.fc-event-is-todo, .fc-list-event.fc-event-is-todo {
+    border-left: 5px solid var(--todo-folder-color, var(--interactive-accent)) !important;
+    box-sizing: border-box !important;
+}
+
+/* Make the 'todos' and '+' buttons slightly rounded to fit the UI */
+.fc-tasks-button,
+.fc-addTask-button {
+    border-radius: var(--radius-s) !important;
+    padding: 6px 12px !important;
+    font-size: var(--font-ui-small) !important;
+}
+
+/* Ensure styles are applied directly to the todos and plus buttons in the header */
+.fc-header-toolbar .fc-tasks-button,
+.fc-header-toolbar .fc-addTask-button {
+    border-radius: var(--radius-s) !important;
+    padding: 6px 12px !important;
+    font-size: var(--font-ui-small) !important;
+    font-weight: normal !important;
+    margin-left: 8px !important;
+}
