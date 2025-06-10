@@ -465,6 +465,17 @@ If your plugin does not need CSS, delete this file.
     overflow-y: auto;
     z-index: 10;
     box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 300px;
+    transform: translateX(100%);
+    transition: transform 0.3s ease;
+}
+
+#tasks-sidebar.open {
+    transform: translateX(0);
 }
 
 #tasks-sidebar h3 {
@@ -476,27 +487,43 @@ If your plugin does not need CSS, delete this file.
 /* Calendar Container Styles */
 #calendar-container {
     position: relative;
+    height: 100%;
+    width: 100%;
     transition: all 0.3s ease;
 }
 
 /* Ensure calendar content adjusts properly */
 .fc-view-harness {
-    transition: all 0.3s ease;
+    height: 100% !important;
+    min-height: 100% !important;
 }
 
 /* Ensure the calendar grid adjusts properly */
 .fc-scrollgrid {
-    transition: all 0.3s ease;
+    height: 100% !important;
+    min-height: 100% !important;
 }
 
 /* Ensure calendar events and content adjust properly */
 .fc-view {
-    transition: all 0.3s ease;
+    height: 100% !important;
+    min-height: 100% !important;
 }
 
-/* Ensure calendar header adjusts properly */
+/* Ensure the main calendar container takes full height */
+.fc {
+    height: 100% !important;
+    min-height: 100% !important;
+}
+
+/* Ensure the calendar header stays at the top */
 .fc-header-toolbar {
-    transition: all 0.3s ease;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background-color: var(--background-primary);
+    padding: 8px 0;
+    margin-bottom: 0 !important;
 }
 
 /* Tasks Button in Calendar Header */
