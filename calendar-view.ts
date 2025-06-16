@@ -59,6 +59,7 @@ export class CalendarView extends ItemView {
     private resizeHandle: HTMLElement | null = null;
     private taskListEl: HTMLElement | null = null;
     private sidebarRefreshInterval: any = null;
+    private sidebarOpenSections: { today: boolean; week: boolean; later: boolean } = { today: true, week: true, later: true };
 
     constructor(leaf: WorkspaceLeaf, plugin: MyPlugin) { // Accept plugin instance
         super(leaf);
@@ -91,7 +92,7 @@ export class CalendarView extends ItemView {
         const calendarEl = mainContainer.createEl("div", { 
             attr: { 
                 id: "calendar-container", 
-                style: "width: 100%; height: 100%; transition: all 0.3s ease;" 
+                style: `width: 100%; height: 100%; transition: all 0.3s ease; position: relative;` 
             } 
         });
 
@@ -107,7 +108,7 @@ export class CalendarView extends ItemView {
         this.tasksSidebar = mainContainer.createEl("div", {
             attr: {
                 id: "tasks-sidebar",
-                style: `width: 300px; min-width: 300px; max-width: 300px; height: 100%; border-${isSidebarLeft ? 'right' : 'left'}: 1px solid var(--background-modifier-border); background: var(--background-primary); display: flex; flex-direction: column; transition: margin 0.3s ease; margin-${isSidebarLeft ? 'left' : 'right'}: -300px;`
+                style: `width: 300px; min-width: 300px; max-width: 300px; height: 100%; border-${isSidebarLeft ? 'right' : 'left'}: 1px solid var(--background-modifier-border); background: var(--background-primary); display: flex; flex-direction: column; transition: transform 0.3s ease; transform: translateX(${isSidebarLeft ? '-100%' : '100%'}); position: absolute; ${isSidebarLeft ? 'left: 0;' : 'right: 0;'} z-index: 1;`
             }
         });
         // REMOVE: Resize handle and all resizing logic
@@ -204,7 +205,7 @@ export class CalendarView extends ItemView {
         filterBtn.onclick = () => {
             new FilterModal(
                 this.app,
-                this.plugin.settings.calendarFolderSettings.map(f => f.path),
+                this.plugin.settings.calendarFolderSettings.map((f: any) => f.path),
                 currentFolderFilter,
                 currentDueFilter,
                 currentImportanceFilter,
@@ -221,7 +222,7 @@ export class CalendarView extends ItemView {
         this.taskListEl = this.tasksSidebar.createEl("ul", { attr: { style: "list-style: none; padding: 0; margin: 0; flex: 1; overflow-y: auto;" } });
         const taskList = this.taskListEl;
         addTodoBtn.onclick = () => {
-            new TaskModal(this.app, this.plugin, this.plugin.settings.calendarFolderSettings.map(f => f.path), 
+            new TaskModal(this.app, this.plugin, this.plugin.settings.calendarFolderSettings.map((f: any) => f.path), 
                 () => { 
                     this.loadAndRenderTasks(taskList, currentFolderFilter, currentDueFilter, currentImportanceFilter);
                     if (this.calendar) { this.calendar.refetchEvents(); }
@@ -260,7 +261,7 @@ export class CalendarView extends ItemView {
                         new TaskModal(
                             this.app,
                             this.plugin,
-                            this.plugin.settings.calendarFolderSettings.map(f => f.path),
+                            this.plugin.settings.calendarFolderSettings.map((f: any) => f.path),
                             () => {
                                 if (this.taskListEl) this.loadAndRenderTasks(this.taskListEl);
                                 if (this.calendar) this.calendar.refetchEvents();
@@ -294,65 +295,45 @@ export class CalendarView extends ItemView {
 
             // --- Step 3: Add eventContent for custom todo rendering ---
             eventContent: (arg) => {
-                const { event, view } = arg; // Correctly el is not typically used here for parent styling
+                const { event, view } = arg;
                 const extendedProps = event.extendedProps;
 
                 if (extendedProps && extendedProps.isTodo) {
-                    // CSS custom property for folder color is now set in eventDidMount
-
                     const container = document.createElement('div');
                     container.style.display = 'flex';
                     container.style.alignItems = 'center';
 
                     const checkbox = document.createElement('input');
                     checkbox.type = 'checkbox';
-                    checkbox.checked = !!extendedProps.completed;
+                    // --- FIX: Use completedDates for recurring tasks ---
+                    let isChecked = false;
+                    if (extendedProps.isRecurring && extendedProps.due && Array.isArray(extendedProps.completedDates)) {
+                        isChecked = extendedProps.completedDates.includes(extendedProps.due);
+                    } else {
+                        isChecked = !!extendedProps.completed;
+                    }
+                    checkbox.checked = isChecked;
                     checkbox.style.marginRight = '5px';
                     checkbox.addEventListener('click', async (e) => {
-                        e.stopPropagation(); // Prevent event click from firing
-
-                        const currentCheckbox = e.target as HTMLInputElement;
-                        const newCompletedStatus = currentCheckbox.checked; // Browser has already visually updated this
-                        const oldCompletedStatusForRevert = !newCompletedStatus;
-
-                        // 1. Optimistic UI update for the current DOM elements
-                        if (newCompletedStatus) {
-                            titleEl.style.textDecoration = 'line-through';
-                            titleEl.style.opacity = '0.7';
-                        } else {
-                            titleEl.style.textDecoration = 'none';
-                            titleEl.style.opacity = '1';
-                        }
-                        // Optimistically update FullCalendar's internal model for this event instance.
-                        event.setExtendedProp('completed', newCompletedStatus);
-
+                        e.stopPropagation();
+                        const newCompleted = checkbox.checked;
+                        event.setExtendedProp('completed', newCompleted);
                         try {
-                            // 2. Update the source of truth (the file)
-                            await this.updateTodoCompletionInFile(extendedProps.filePath, newCompletedStatus);
-
-                            // 3. Wait for metadata cache and then refetch all calendar events
-                            const metadataResolvedCallback = () => {
-                                // Remove the listener to ensure it only runs once
-                                this.app.metadataCache.off('resolved', metadataResolvedCallback);
-                                if (this.calendar) {
-                                    this.calendar.refetchEvents();
+                            if (extendedProps.isRecurring && extendedProps.due) {
+                                await this.updateRecurringTodoCompletion(extendedProps.filePath, extendedProps.due, newCompleted);
+                            } else {
+                                await this.updateTodoCompletionInFile(extendedProps.filePath, newCompleted);
+                            }
+                            setTimeout(() => {
+                                if (this.calendar) this.calendar.refetchEvents();
+                                if (this.taskListEl) {
+                                    this.loadAndRenderTasks(this.taskListEl);
                                 }
-                            };
-                            this.app.metadataCache.on('resolved', metadataResolvedCallback);
-
+                            }, 100);
                         } catch (error) {
                             new Notice('Failed to update todo completion status.');
-                            // 4. Revert optimistic UI changes if file update failed
-                            currentCheckbox.checked = oldCompletedStatusForRevert;
-                            if (oldCompletedStatusForRevert) {
-                                titleEl.style.textDecoration = 'line-through';
-                                titleEl.style.opacity = '0.7';
-                            } else {
-                                titleEl.style.textDecoration = 'none';
-                                titleEl.style.opacity = '1';
-                            }
-                            // Revert FullCalendar's internal model for this event instance as well.
-                            event.setExtendedProp('completed', oldCompletedStatusForRevert);
+                            checkbox.checked = !newCompleted;
+                            event.setExtendedProp('completed', !newCompleted);
                         }
                     });
                     checkbox.classList.add('obby-todo-checkbox');
@@ -361,26 +342,16 @@ export class CalendarView extends ItemView {
                     }
 
                     const titleEl = document.createElement('span');
-                    titleEl.textContent = event.title; // Original title, without [DONE]
-                    if (extendedProps.completed) {
+                    titleEl.textContent = event.title;
+                    if (isChecked) {
                         titleEl.style.textDecoration = 'line-through';
                         titleEl.style.opacity = '0.7';
                     }
                     container.appendChild(titleEl);
-
-                    // --- Step 4: Apply strip class for timed todos in timeGrid view ---
-                    if (view.type.startsWith('timeGrid') && extendedProps.dueTime) {
-                        // The class is added in formatRawTodoForFullCalendar
-                        // Ensure the container is returned correctly for custom rendering
-                    }
-                    // --- End Step 4 ---
                     return { domNodes: [container] };
                 }
-                // For non-todo events, let FullCalendar handle default rendering or return null.
-                // Returning true or an empty object can sometimes strip FC default content.
-                // A safer default is to construct a simple node if we don't want to interfere too much.
                 const titleDiv = document.createElement('div');
-                titleDiv.innerHTML = event.title; // Basic rendering for non-todos
+                titleDiv.innerHTML = event.title;
                 return { domNodes: [titleDiv] };
             },
             // --- End Step 3 ---
@@ -418,14 +389,20 @@ export class CalendarView extends ItemView {
                     if (arg.event.extendedProps.originalColor) {
                         arg.el.style.setProperty('--todo-folder-color', arg.event.extendedProps.originalColor);
                     }
-                    // In agenda/list view, replace the dot with a checkbox for todos
                     if (arg.el.classList.contains('fc-list-event')) {
                         const dotCell = arg.el.querySelector('.fc-list-event-graphic');
                         if (dotCell) {
                             dotCell.innerHTML = '';
                             const checkbox = document.createElement('input');
                             checkbox.type = 'checkbox';
-                            checkbox.checked = !!arg.event.extendedProps.completed;
+                            // --- FIX: Use completedDates for recurring tasks in agenda/list view ---
+                            let isChecked = false;
+                            if (arg.event.extendedProps.isRecurring && arg.event.extendedProps.due && Array.isArray(arg.event.extendedProps.completedDates)) {
+                                isChecked = arg.event.extendedProps.completedDates.includes(arg.event.extendedProps.due);
+                            } else {
+                                isChecked = !!arg.event.extendedProps.completed;
+                            }
+                            checkbox.checked = isChecked;
                             checkbox.style.margin = '0 auto';
                             checkbox.style.display = 'block';
                             checkbox.onclick = async (e) => {
@@ -433,13 +410,14 @@ export class CalendarView extends ItemView {
                                 const newCompleted = checkbox.checked;
                                 arg.event.setExtendedProp('completed', newCompleted);
                                 try {
-                                    await this.updateTodoCompletionInFile(arg.event.extendedProps.filePath, newCompleted);
+                                    if (arg.event.extendedProps.isRecurring && arg.event.extendedProps.due) {
+                                        await this.updateRecurringTodoCompletion(arg.event.extendedProps.filePath, arg.event.extendedProps.due, newCompleted);
+                                    } else {
+                                        await this.updateTodoCompletionInFile(arg.event.extendedProps.filePath, newCompleted);
+                                    }
                                     setTimeout(() => {
                                         if (this.calendar) this.calendar.refetchEvents();
-                                        // Force sidebar refresh by recreating the task list element
-                                        if (this.tasksSidebar) {
-                                            if (this.taskListEl) this.taskListEl.remove();
-                                            this.taskListEl = this.tasksSidebar.createEl("ul", { attr: { style: "list-style: none; padding: 0; margin: 0; flex: 1; overflow-y: auto;" } });
+                                        if (this.taskListEl) {
                                             this.loadAndRenderTasks(this.taskListEl);
                                         }
                                     }, 100);
@@ -676,7 +654,7 @@ export class CalendarView extends ItemView {
             } else {
                 this.saveEvent(result);
             }
-        }, this.plugin.settings.calendarFolderSettings.map(s => s.path), undefined, selectionInfo.startStr, selectionInfo.endStr, selectionInfo.allDay, false).open();
+        }, this.plugin.settings.calendarFolderSettings.map((f: any) => f.path), undefined, selectionInfo.startStr, selectionInfo.endStr, selectionInfo.allDay, false).open();
     }
 
     handleEventClick(clickInfo: EventClickArg) {
@@ -685,11 +663,11 @@ export class CalendarView extends ItemView {
         // --- Step 2: Basic Click Handling for Todos ---
         if (clickedEvent.extendedProps.isTodo) {
             // --- Step 3: Open TaskModal for todos ---
-            const { filePath, title, description, due, dueTime, priority, folderPath } = clickedEvent.extendedProps;
+            const { filePath, title, description, due, dueTime, priority, folderPath, isRecurring, daysOfWeek, startRecur, endRecur } = clickedEvent.extendedProps;
             new TaskModal(
                 this.app,
                 this.plugin,
-                this.plugin.settings.calendarFolderSettings.map(f => f.path),
+                this.plugin.settings.calendarFolderSettings.map((f: any) => f.path),
                 () => { if (this.calendar) this.calendar.refetchEvents(); }, // Refresh callback
                 filePath,
                 {
@@ -698,7 +676,11 @@ export class CalendarView extends ItemView {
                     due: due,
                     dueTime: dueTime,
                     priority: priority,
-                    folder: folderPath
+                    folder: folderPath,
+                    isRecurring: isRecurring,
+                    daysOfWeek: daysOfWeek,
+                    startRecur: startRecur,
+                    endRecur: endRecur
                 }
             ).open();
             return;
@@ -725,7 +707,7 @@ export class CalendarView extends ItemView {
             } else { 
                 this.saveEvent(result);
             }
-        }, this.plugin.settings.calendarFolderSettings.map(s => s.path), eventData, undefined, undefined, undefined, true).open();
+        }, this.plugin.settings.calendarFolderSettings.map((f: any) => f.path), eventData, undefined, undefined, undefined, true).open();
     }
 
     handleEventDrop(dropInfo: any) {
@@ -1092,8 +1074,7 @@ export class CalendarView extends ItemView {
                 try {
                     const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
                     if (frontmatter && frontmatter.title && frontmatter.start) {
-                        // Ensure this is NOT a todo file from a 'todos' subfolder
-                        // (This check might be redundant if 'todos' folders are not typically inside main calendar event folders)
+                        // This check might be redundant if 'todos' folders are not typically inside main calendar event folders
                         if (file.path.includes(`/${folderSetting.path}/todos/`)) {
                             continue; 
                         }
@@ -1133,17 +1114,74 @@ export class CalendarView extends ItemView {
         // Load Todos
         const rawTodos = await this.getRawTodosData();
         for (const todoItem of rawTodos) {
-            const formattedTodo = this.formatRawTodoForFullCalendar(todoItem.filePath, todoItem.metadata, todoItem.folderSetting.color);
-            if (formattedTodo) {
-                // Filter completed todos based on current view and settings
-                const viewType = this.calendar?.view?.type;
-                const isCompleted = formattedTodo.extendedProps?.completed;
-                if (isCompleted) {
-                    if (viewType === 'timeGridWeek' && !this.plugin.settings.showCompletedInWeekView) continue;
-                    if (viewType === 'timeGridDay' && !this.plugin.settings.showCompletedInDayView) continue;
-                    if (viewType && viewType.startsWith('list') && !this.plugin.settings.showCompletedInAgenda) continue;
+            const { filePath, metadata, folderSetting } = todoItem;
+
+            // Check if it's a recurring task template
+            if (metadata.isRecurring && Array.isArray(metadata.daysOfWeek) && metadata.daysOfWeek.length > 0 && (metadata.startRecur || metadata.start)) {
+                const startDateString = metadata.startRecur || metadata.start;
+                const start = new Date(startDateString);
+                start.setHours(0, 0, 0, 0); // Use local time
+
+                // Use calendar's view range for efficiency
+                const viewStart = this.calendar ? this.calendar.view.activeStart : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+                const viewEnd = this.calendar ? this.calendar.view.activeEnd : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+                const endRecur = metadata.endRecur ? new Date(metadata.endRecur) : viewEnd;
+                endRecur.setHours(23, 59, 59, 999); // Use local time
+
+                let loopStart = start > viewStart ? start : viewStart;
+                let loopEnd = endRecur < viewEnd ? endRecur : viewEnd;
+
+                let current = new Date(loopStart);
+
+                // Recurrence pattern logic
+                const recurrencePattern = metadata.recurrencePattern || 'weekly';
+                // For monthly, determine the week-of-month and day-of-week of the start
+                let startWeekOfMonth = null;
+                if (recurrencePattern === 'monthly') {
+                    const temp = new Date(start);
+                    startWeekOfMonth = Math.ceil((temp.getDate() - 1) / 7);
                 }
-                allFcEvents.push(formattedTodo);
+
+                while (current <= loopEnd) {
+                    if (metadata.daysOfWeek.includes(current.getDay())) {
+                        let include = false;
+                        if (recurrencePattern === 'weekly') {
+                            include = true;
+                        } else if (recurrencePattern === 'bi-monthly') {
+                            // Calculate week number since start
+                            const diffDays = Math.floor((current.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+                            const weekNum = Math.floor(diffDays / 7);
+                            include = (weekNum % 2 === 0);
+                        } else if (recurrencePattern === 'monthly') {
+                            // Only include if same week-of-month and day-of-week as start
+                            const weekOfMonth = Math.ceil((current.getDate() - 1) / 7);
+                            include = (weekOfMonth === startWeekOfMonth);
+                        }
+                        if (include) {
+                            const instanceDateStr = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
+                            const completedDates = metadata.completedDates || [];
+                            const isInstanceCompleted = completedDates.includes(instanceDateStr);
+                            const instanceMetadata = {
+                                ...metadata,
+                                due: instanceDateStr,
+                                id: `${filePath}-${instanceDateStr}`,
+                                completed: isInstanceCompleted
+                            };
+                            const formattedTodo = this.formatRawTodoForFullCalendar(filePath, instanceMetadata, folderSetting.color);
+                            if (formattedTodo) {
+                                allFcEvents.push(formattedTodo);
+                            }
+                        }
+                    }
+                    current.setDate(current.getDate() + 1);
+                }
+            } else if (metadata.due) {
+                // It's a non-recurring task with a due date
+                const formattedTodo = this.formatRawTodoForFullCalendar(filePath, metadata, folderSetting.color);
+                if (formattedTodo) {
+                    allFcEvents.push(formattedTodo);
+                }
             }
         }
 
@@ -1169,78 +1207,33 @@ export class CalendarView extends ItemView {
     }
 
     formatRawTodoForFullCalendar(filePath: string, metadata: any, folderColor?: string): any {
-        let startDateTime: string | undefined = undefined;
-        let endDateTime: string | undefined = undefined; // Keep for consistency, though won't be used for all-day
-        let allDay = true; // Default to allDay true now for all displayable todos
-
-        if (metadata.due) {
-            // All tasks with a due date will be all-day events
-            startDateTime = metadata.due; // Use just the date string
-            // No need to check metadata.dueTime for start/end or allDay status anymore
-            // endDateTime logic for timed events is removed.
-        } else { // No due date, do not display on calendar
-            return null; 
+        if (!metadata.due) {
+            return null;
         }
 
-        const getLuminance = (hexColor: string): number => {
-            if (!hexColor || hexColor.length < 7) return 0; // Default to dark if color is invalid
-            const r = parseInt(hexColor.slice(1, 3), 16) / 255;
-            const g = parseInt(hexColor.slice(3, 5), 16) / 255;
-            const b = parseInt(hexColor.slice(5, 7), 16) / 255;
-            return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-        };
-        
-        // --- Modified for new todo styling (vertical line + gray outline) ---
-        const taskBgColor = 'var(--background-primary)';
-        const taskMainOutlineColor = 'var(--background-modifier-border)';
-        const taskTextColor = 'var(--text-normal)';
-        // folderColor (from extendedProps.originalColor) will be used for the ::before pseudo-element via CSS var
-        // --- End Modification ---
-
-        // --- Step 2: Enhanced Visual Cue for Todos ---
-        let displayTitle = metadata.title;
-        // --- Step 3: Remove [DONE] prefix, eventContent handles this ---
-        // if (metadata.completed) {
-        //     displayTitle = `[DONE] ${metadata.title}`;
-        // }
-        // --- End Step 3 ---
-        // --- End Step 2 ---
+        const startDateTime = metadata.due + (metadata.dueTime ? `T${metadata.dueTime}` : '');
+        const allDay = !metadata.dueTime;
 
         return {
-            id: filePath,
-            title: displayTitle, // Use the original title
+            id: metadata.id || filePath,
+            title: metadata.title,
             start: startDateTime,
-            end: endDateTime, // --- Step 4: Add end time for timed todos ---
             allDay: allDay,
-            // --- Modified for new todo styling ---
-            backgroundColor: taskBgColor,
-            borderColor: taskMainOutlineColor, // This is for the main gray outline
-            textColor: taskTextColor,
-            // --- End Modification ---
-            // --- Step 4: Add class for timed todos ---
+            backgroundColor: 'var(--background-primary)',
+            borderColor: 'var(--background-modifier-border)',
+            textColor: 'var(--text-normal)',
             classNames: [
-                'fc-event-is-todo', // General class for all todos
+                'fc-event-is-todo',
                 ...(metadata.completed ? ['fc-event-todo-completed'] : []),
-                // ...(allDay === false && metadata.dueTime ? ['fc-todo-timegrid-strip'] : []) // No longer needed as all are all-day
             ],
-            // --- End Step 4 ---
-            // --- Step 3: Disable editing for todos ---
-            // editable: false, // Todos are not editable by dragging/resizing for now -- Step 5 enables this
-            // --- End Step 3 ---
-            // --- Step 5: Make todos draggable but not resizable by duration ---
-            editable: true, 
+            editable: true,
             eventDurationEditable: false,
-            // --- End Step 5 ---
             extendedProps: {
+                ...metadata,
                 isTodo: true,
                 filePath: filePath,
                 completed: !!metadata.completed,
-                due: metadata.due,
-                dueTime: metadata.dueTime,
-                description: metadata.description,
-                priority: metadata.priority,
-                originalColor: folderColor || 'var(--interactive-accent)'
-                // Include other raw metadata if needed later
+                originalColor: folderColor || 'var(--interactive-accent)',
             }
         };
     }
@@ -1254,24 +1247,18 @@ export class CalendarView extends ItemView {
         const calendarContainer = document.getElementById('calendar-container');
     
         if (this.isTasksSidebarOpen) {
-            const sidebarWidth = 300;
-            this.tasksSidebar.style.width = `300px`;
-            this.tasksSidebar.style.minWidth = '300px';
-            this.tasksSidebar.style.maxWidth = '300px';
-            this.tasksSidebar.style[`margin${isSidebarLeft ? 'Left' : 'Right'}`] = '0';
-    
+            this.tasksSidebar.style.transform = 'translateX(0)';
             if (calendarContainer) {
                 calendarContainer.style.width = `calc(100% - 300px)`;
-                calendarContainer.style.marginLeft = '0';
-                calendarContainer.style.marginRight = '0';
+                calendarContainer.style.marginLeft = isSidebarLeft ? '300px' : '0';
+                calendarContainer.style.marginRight = isSidebarLeft ? '0' : '300px';
             }
         } else { // Closing
-            this.tasksSidebar.style[`margin${isSidebarLeft ? 'Left' : 'Right'}`] = `-300px`;
-    
+            this.tasksSidebar.style.transform = `translateX(${isSidebarLeft ? '-100%' : '100%'})`;
             if (calendarContainer) {
                 calendarContainer.style.width = '100%';
-                calendarContainer.style.marginRight = '0';
                 calendarContainer.style.marginLeft = '0';
+                calendarContainer.style.marginRight = '0';
             }
         }
     
@@ -1315,51 +1302,68 @@ export class CalendarView extends ItemView {
                 for (const file of files) {
                     const metadata = this.app.metadataCache.getFileCache(file)?.frontmatter;
                     if (metadata) {
-                        // Apply folder filter
-                        if (folderFilter && !file.path.startsWith(folderFilter + '/todos')) continue;
-                        // Apply due date filter
-                        if (dueFilter) {
-                            // Assuming task.metadata.due is "YYYY-MM-DD"
-                            const dateString = metadata.due;
-                            
-                            // Explicitly parse as UTC midnight
-                            const dueDateUtc = new Date(dateString + "T00:00:00.000Z");
+                        // Recurring logic for sidebar
+                        if (metadata.isRecurring && Array.isArray(metadata.daysOfWeek) && metadata.startRecur) {
+                            // Expand for each matching day in the next 30 days
+                            const start = new Date(metadata.startRecur);
+                            const end = metadata.endRecur ? new Date(metadata.endRecur) : new Date(Date.now() + 1000*60*60*24*30);
+                            let current = new Date(Math.max(start.getTime(), Date.now() - (24 * 60 * 60 * 1000))); // Also show today's
+                            for (let i = 0; i < 30; i++) {
+                                if (current > end) break;
+                                if (metadata.daysOfWeek.includes(current.getDay())) {
+                                    const completedDates = metadata.completedDates || [];
+                                    // Use local date string for due date
+                                    const instanceDate = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
+                                    const isCompleted = completedDates.includes(instanceDate);
 
-                            // Get today as UTC midnight for comparisons
-                            const today = new Date();
-                            const todayUtcMidnight = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-
-                            let isOverdue = false;
-                            let dueDisplay = '';
-                            try {
-                                isOverdue = dueDateUtc.getTime() < todayUtcMidnight.getTime();
-
-                                const msPerDay = 1000 * 60 * 60 * 24;
-                                const diffDays = Math.floor((dueDateUtc.getTime() - todayUtcMidnight.getTime()) / msPerDay);
-
-                                if (diffDays >= 0 && diffDays < 7) {
-                                    const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-                                    dueDisplay = daysOfWeek[dueDateUtc.getUTCDay()];
-                                } else {
-                                    const dd = String(dueDateUtc.getUTCDate()).padStart(2, '0');
-                                    const mm = String(dueDateUtc.getUTCMonth() + 1).padStart(2, '0');
-                                    dueDisplay = `${dd}/${mm}`;
+                                    if (isCompleted && !this.plugin.settings.showCompletedInSidebar) {
+                                        // continue;
+                                    } else {
+                                        const instanceMeta = { ...metadata, due: instanceDate, completed: isCompleted };
+                                        tasks.push({ file, metadata: instanceMeta });
+                                    }
                                 }
-                            } catch (e) {
-                                dueDisplay = metadata.due; // Fallback
+                                current.setDate(current.getDate() + 1);
                             }
-                            if (isOverdue) continue;
-                        } else if (dueFilter === 'none') {
-                            if (metadata.due) continue;
+                        } else {
+                            // Apply folder filter
+                            if (folderFilter && !file.path.startsWith(folderFilter + '/todos')) continue;
+                            // Apply due date filter
+                            if (dueFilter) {
+                                const dateString = metadata.due;
+                                const dueDateUtc = new Date(dateString + "T00:00:00.000Z");
+                                const today = new Date();
+                                const todayUtcMidnight = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+                                let isOverdue = false;
+                                let dueDisplay = '';
+                                try {
+                                    isOverdue = dueDateUtc.getTime() < todayUtcMidnight.getTime();
+                                    const msPerDay = 1000 * 60 * 60 * 24;
+                                    const diffDays = Math.floor((dueDateUtc.getTime() - todayUtcMidnight.getTime()) / msPerDay);
+                                    if (diffDays >= 0 && diffDays < 7) {
+                                        const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                                        dueDisplay = daysOfWeek[dueDateUtc.getUTCDay()];
+                                    } else {
+                                        const dd = String(dueDateUtc.getUTCDate()).padStart(2, '0');
+                                        const mm = String(dueDateUtc.getUTCMonth() + 1).padStart(2, '0');
+                                        dueDisplay = `${dd}/${mm}`;
+                                    }
+                                } catch (e) {
+                                    dueDisplay = metadata.due; // Fallback
+                                }
+                                if (isOverdue) continue;
+                            } else if (dueFilter === 'none') {
+                                if (metadata.due) continue;
+                            }
+                            // Apply importance filter
+                            if (importanceFilter) {
+                                const priority = (metadata.priority || 'none').toLowerCase();
+                                if (importanceFilter !== priority) continue;
+                            }
+                            // Filter out completed tasks if the setting is off
+                            if (!this.plugin.settings.showCompletedInSidebar && metadata.completed) continue;
+                            tasks.push({ file, metadata });
                         }
-                        // Apply importance filter
-                        if (importanceFilter) {
-                            const priority = (metadata.priority || 'none').toLowerCase();
-                            if (importanceFilter !== priority) continue;
-                        }
-                        // Filter out completed tasks if the setting is off
-                        if (!this.plugin.settings.showCompletedInSidebar && metadata.completed) continue;
-                        tasks.push({ file, metadata });
                     }
                 }
             }
@@ -1396,168 +1400,203 @@ export class CalendarView extends ItemView {
             if (aTime[1] !== bTime[1]) return aTime[1] - bTime[1];
             return 0;
         });
-        // Render tasks
+
+        // --- Accordion Section Logic ---
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        const weekEnd = new Date(today);
+        weekEnd.setDate(today.getDate() + 6); // 7 days from today (inclusive)
+
+        const dueToday: typeof tasks = [];
+        const dueThisWeek: typeof tasks = [];
+        const dueLater: typeof tasks = [];
+
         for (const task of tasks) {
-            const taskItem = container.createDiv({
-                cls: 'task-item',
-                attr: {
-                    style: 'display: flex; align-items: center; padding: 8px; margin-bottom: 4px; border-radius: 4px; cursor: pointer;'
-                }
-            });
-            // Add hover effect
-            taskItem.addEventListener('mouseover', () => {
-                taskItem.style.backgroundColor = 'var(--background-secondary)';
-            });
-            taskItem.addEventListener('mouseout', () => {
-                taskItem.style.backgroundColor = '';
-            });
-            // Add click handler to open edit modal
-            taskItem.addEventListener('click', () => {
-                const folder = task.file.path.split('/')[0];
-                new TaskModal(
-                    this.app,
-                    this.plugin,
-                    this.plugin.settings.calendarFolderSettings.map(f => f.path),
-                    () => {
-                        this.loadAndRenderTasks(container, folderFilter, dueFilter, importanceFilter);
-                        if (this.calendar) { this.calendar.refetchEvents(); }
-                    },
-                    task.file.path,
-                    {
-                        title: task.metadata.title,
-                        description: task.metadata.description,
-                        due: task.metadata.due,
-                        dueTime: task.metadata.dueTime,
-                        priority: task.metadata.priority,
-                        folder: folder
-                    }
-                ).open();
-            });
-            // Checkbox for completion
-            const checkbox = taskItem.createEl('input', { type: 'checkbox', attr: { style: 'margin-right: 8px; flex-shrink: 0;' } });
-            checkbox.checked = !!task.metadata.completed;
-            checkbox.addEventListener('click', async (e) => {
-                e.stopPropagation(); // Prevent triggering the edit modal
-                const file = this.app.vault.getAbstractFileByPath(task.file.path);
-                if (file instanceof TFile) {
-                    let content = await this.app.vault.read(file);
-                    // Toggle completed value based on current metadata, not checkbox state
-                    const newCompleted = !task.metadata.completed;
-                    content = content.replace(/(---[\s\S]*?completed: )(true|false)/, `$1${newCompleted}`);
-                    await this.app.vault.modify(file, content);
-                    setTimeout(() => {
-                        if (this.calendar) this.calendar.refetchEvents();
-                        if (this.taskListEl) {
-                            this.loadAndRenderTasks(this.taskListEl);
-                        }
-                    }, 100);
-                }
-            });
-            // Color dot (replace with vertical border)
-            const folder = task.file.path.split('/')[0];
-            const folderSettings = this.plugin.settings.calendarFolderSettings.find(f => f.path === folder);
-            if (folderSettings) {
-                taskItem.style.borderLeft = `5px solid ${folderSettings.color}`;
+            if (!task.metadata.due) {
+                dueLater.push(task);
+                continue;
+            }
+            // Parse due date as local date
+            const [year, month, day] = String(task.metadata.due).split('-').map(Number);
+            const dueDate = new Date(year, month - 1, day);
+            dueDate.setHours(0,0,0,0);
+            if (dueDate.getTime() === today.getTime()) {
+                dueToday.push(task);
+            } else if (dueDate.getTime() > today.getTime() && dueDate.getTime() <= weekEnd.getTime()) {
+                dueThisWeek.push(task);
             } else {
-                taskItem.style.borderLeft = '5px solid transparent';
+                dueLater.push(task);
             }
-            // Title and description container (flex column, inline with checkbox and dot)
-            const textContainer = taskItem.createDiv({
-                attr: { style: 'flex-grow: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center;' }
-            });
-            // Title (single line)
-            textContainer.createDiv({
-                text: task.metadata.title,
-                attr: {
-                    style: `font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: var(--obby-task-max-width, 90px); line-height: 1.2; min-width: 0; flex-shrink: 1;${task.metadata.completed ? ' text-decoration: line-through; color: var(--text-muted);' : ''}`
-                }
-            });
-            // Description preview (one line, small, muted, just under title)
-            if (task.metadata.description) {
-                textContainer.createDiv({
-                    text: String(task.metadata.description).replace(/\n/g, ' ').slice(0, 80),
+        }
+
+        // Accordion state (persistent)
+        const openSections = this.sidebarOpenSections;
+
+        function renderAccordionSection(this: CalendarView, title: string, sectionKey: keyof typeof openSections, sectionTasks: typeof tasks) {
+            const section = container.createDiv({ cls: 'obby-tasks-accordion-section' });
+            const header = section.createDiv({ cls: 'obby-tasks-accordion-header', attr: { style: 'cursor: pointer; font-weight: bold; font-size: 1.05em; padding: 6px 0; display: flex; align-items: center;' } });
+            const arrow = header.createSpan({ text: openSections[sectionKey] ? '▼' : '▶', attr: { style: 'margin-right: 8px; font-size: 1.1em;' } });
+            header.createSpan({ text: title });
+            header.onclick = () => {
+                this.sidebarOpenSections[sectionKey] = !this.sidebarOpenSections[sectionKey];
+                arrow.textContent = this.sidebarOpenSections[sectionKey] ? '▼' : '▶';
+                content.style.display = this.sidebarOpenSections[sectionKey] ? '' : 'none';
+            };
+            const content = section.createDiv({ cls: 'obby-tasks-accordion-content' });
+            content.style.display = this.sidebarOpenSections[sectionKey] ? '' : 'none';
+            for (const task of sectionTasks) {
+                // Render each task as before
+                // --- Begin task rendering ---
+                const taskItem = content.createDiv({
+                    cls: 'task-item',
                     attr: {
-                        style: `font-size: 0.85em; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: var(--obby-task-max-width, 110px);${task.metadata.completed ? ' text-decoration: line-through;' : ''}`
+                        style: 'display: flex; align-items: center; padding: 8px; margin-bottom: 4px; border-radius: 4px; cursor: pointer;'
                     }
                 });
-            }
-            // Due date (keep inline)
-            if (task.metadata.due) {
-                // Check if due date is in the past
-                let isOverdue = false;
-                let dueDisplay = '';
-                try {
-                    const rawDueDateValue = task.metadata.due;
-
-                    if (rawDueDateValue) {
-                        const rawDueDateString = String(rawDueDateValue); // Ensure it's a string
-
-                        // Check if the string starts with YYYY-MM-DD format
-                        if (/^\d{4}-\d{2}-\d{2}/.test(rawDueDateString)) {
-                            const datePart = rawDueDateString.substring(0, 10); // Take only the YYYY-MM-DD part
-                            const [year, monthNum, dayNum] = datePart.split('-').map(Number);
-
-                            // Create Date object for UTC midnight of the given date
-                            // Month is 0-indexed for Date.UTC (0 for January, 11 for December)
-                            const dueDateUtc = new Date(Date.UTC(year, monthNum - 1, dayNum));
-
-                            const today = new Date();
-                            const todayUtcMidnight = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-
-                            isOverdue = dueDateUtc.getTime() < todayUtcMidnight.getTime();
-
-                            const msPerDay = 1000 * 60 * 60 * 24;
-                            const diffDays = Math.floor((dueDateUtc.getTime() - todayUtcMidnight.getTime()) / msPerDay);
-
-                            if (diffDays >= 0 && diffDays < 7) {
-                                const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-                                dueDisplay = daysOfWeek[dueDateUtc.getUTCDay()]; // getUTCDay() is 0 for Sunday
-                            } else {
-                                const dd = String(dueDateUtc.getUTCDate()).padStart(2, '0');
-                                const mm = String(dueDateUtc.getUTCMonth() + 1).padStart(2, '0'); // getUTCMonth() is 0-indexed
-                                dueDisplay = `${dd}/${mm}`;
-                            }
-                        } else {
-                            // Fallback for unexpected date formats
-                            console.warn("Obby Calendar: Due date format for task '" + task.metadata.title + "' is not YYYY-MM-DD: " + rawDueDateString + ". Weekday display might be incorrect.");
-                            const tempDate = new Date(rawDueDateString); // Attempt general parsing
-                            if (!isNaN(tempDate.getTime())) {
-                                 const dd = String(tempDate.getDate()).padStart(2, '0');
-                                 const mm = String(tempDate.getMonth() + 1).padStart(2, '0');
-                                 dueDisplay = `${dd}/${mm}*`; // Asterisk to denote potential inaccuracy
-                            } else {
-                                dueDisplay = 'Invalid Date';
-                            }
+                taskItem.addEventListener('mouseover', () => {
+                    taskItem.style.backgroundColor = 'var(--background-secondary)';
+                });
+                taskItem.addEventListener('mouseout', () => {
+                    taskItem.style.backgroundColor = '';
+                });
+                taskItem.addEventListener('click', () => {
+                    const folder = task.file.path.split('/')[0];
+                    new TaskModal(
+                        this.app,
+                        this.plugin,
+                        this.plugin.settings.calendarFolderSettings.map((f: any) => f.path),
+                        () => {
+                            this.loadAndRenderTasks(container, folderFilter, dueFilter, importanceFilter);
+                            if (this.calendar) { this.calendar.refetchEvents(); }
+                        },
+                        task.file.path,
+                        {
+                            title: task.metadata.title,
+                            description: task.metadata.description,
+                            due: task.metadata.due,
+                            dueTime: task.metadata.dueTime,
+                            priority: task.metadata.priority,
+                            folder: folder,
+                            isRecurring: task.metadata.isRecurring,
+                            daysOfWeek: task.metadata.daysOfWeek,
+                            startRecur: task.metadata.startRecur,
+                            endRecur: task.metadata.endRecur
                         }
-                    } else {
-                        dueDisplay = ''; // No due date provided
+                    ).open();
+                });
+                const checkbox = taskItem.createEl('input', { type: 'checkbox', attr: { style: 'margin-right: 8px; flex-shrink: 0;' } });
+                checkbox.checked = !!task.metadata.completed;
+                checkbox.addEventListener('click', async (e) => {
+                    e.stopPropagation(); // Prevent triggering the edit modal
+                    const newCompletedStatus = !task.metadata.completed;
+                    try {
+                        if (task.metadata.isRecurring) {
+                            await this.updateRecurringTodoCompletion(task.file.path, task.metadata.due, newCompletedStatus);
+                        } else {
+                            await this.updateTodoCompletionInFile(task.file.path, newCompletedStatus);
+                        }
+                        setTimeout(() => {
+                            if (this.calendar) this.calendar.refetchEvents();
+                            if (this.taskListEl) {
+                                this.loadAndRenderTasks(this.taskListEl, folderFilter, dueFilter, importanceFilter);
+                            }
+                        }, 150);
+                    } catch (error) {
+                        new Notice(`Error updating task: ${error.message}`);
+                        checkbox.checked = !newCompletedStatus;
                     }
-                } catch (e) {
-                    console.error("Obby Calendar: Error processing due date for task '" + task.metadata.title + "':", task.metadata.due, e);
-                    dueDisplay = String(task.metadata.due || ''); // Safest fallback in case of error
+                });
+                const folder = task.file.path.split('/')[0];
+                const folderSettings = this.plugin.settings.calendarFolderSettings.find((f: any) => f.path === folder);
+                if (folderSettings) {
+                    taskItem.style.borderLeft = `5px solid ${folderSettings.color}`;
+                } else {
+                    taskItem.style.borderLeft = '5px solid transparent';
                 }
-                // Place due date in its own container
-                const dueContainer = taskItem.createDiv({
+                const textContainer = taskItem.createDiv({
+                    attr: { style: 'flex-grow: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center;' }
+                });
+                textContainer.createDiv({
+                    text: task.metadata.title,
                     attr: {
-                        style: 'display: flex; flex-direction: column; align-items: center; margin-left: 8px; min-width: 36px; max-width: 48px;'
+                        style: `font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: var(--obby-task-max-width, 90px); line-height: 1.2; min-width: 0; flex-shrink: 1;${task.metadata.completed ? ' text-decoration: line-through; color: var(--text-muted);' : ''}`
                     }
                 });
-                dueContainer.createDiv({
-                    text: dueDisplay,
-                    attr: {
-                        style: `font-size: 0.85em; color: ${isOverdue ? 'var(--text-error)' : 'var(--text-muted)'}; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-secondary); padding: 2px 6px; box-sizing: border-box; width: 100%; text-align: center;`
-                    }
-                });
-                if (task.metadata.dueTime) {
-                    dueContainer.createDiv({
-                        text: task.metadata.dueTime,
+                if (task.metadata.description) {
+                    textContainer.createDiv({
+                        text: String(task.metadata.description).replace(/\n/g, ' ').slice(0, 80),
                         attr: {
-                            style: 'font-size: 0.8em; color: var(--text-faint); width: 100%; text-align: center; margin-top: 2px;'
+                            style: `font-size: 0.85em; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: var(--obby-task-max-width, 110px);${task.metadata.completed ? ' text-decoration: line-through;' : ''}`
                         }
                     });
                 }
+                if (task.metadata.due) {
+                    let isOverdue = false;
+                    let dueDisplay = '';
+                    try {
+                        const rawDueDateValue = task.metadata.due;
+                        if (rawDueDateValue) {
+                            const rawDueDateString = String(rawDueDateValue);
+                            if (/^\d{4}-\d{2}-\d{2}/.test(rawDueDateString)) {
+                                const datePart = rawDueDateString.substring(0, 10);
+                                const [year, monthNum, dayNum] = datePart.split('-').map(Number);
+                                const dueDateUtc = new Date(Date.UTC(year, monthNum - 1, dayNum));
+                                const today = new Date();
+                                const todayUtcMidnight = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+                                isOverdue = dueDateUtc.getTime() < todayUtcMidnight.getTime();
+                                const msPerDay = 1000 * 60 * 60 * 24;
+                                const diffDays = Math.floor((dueDateUtc.getTime() - todayUtcMidnight.getTime()) / msPerDay);
+                                if (diffDays >= 0 && diffDays < 7) {
+                                    const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                                    dueDisplay = daysOfWeek[dueDateUtc.getUTCDay()];
+                                } else {
+                                    const dd = String(dueDateUtc.getUTCDate()).padStart(2, '0');
+                                    const mm = String(dueDateUtc.getUTCMonth() + 1).padStart(2, '0');
+                                    dueDisplay = `${dd}/${mm}`;
+                                }
+                            } else {
+                                const tempDate = new Date(rawDueDateString);
+                                if (!isNaN(tempDate.getTime())) {
+                                     const dd = String(tempDate.getDate()).padStart(2, '0');
+                                     const mm = String(tempDate.getMonth() + 1).padStart(2, '0');
+                                     dueDisplay = `${dd}/${mm}*`;
+                                } else {
+                                    dueDisplay = 'Invalid Date';
+                                }
+                            }
+                        } else {
+                            dueDisplay = '';
+                        }
+                    } catch (e) {
+                        dueDisplay = String(task.metadata.due || '');
+                    }
+                    const dueContainer = taskItem.createDiv({
+                        attr: {
+                            style: 'display: flex; flex-direction: column; align-items: center; margin-left: 8px; min-width: 36px; max-width: 48px;'
+                        }
+                    });
+                    dueContainer.createDiv({
+                        text: dueDisplay,
+                        attr: {
+                            style: `font-size: 0.85em; color: ${isOverdue ? 'var(--text-error)' : 'var(--text-muted)'}; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-secondary); padding: 2px 6px; box-sizing: border-box; width: 100%; text-align: center;`
+                        }
+                    });
+                    if (task.metadata.dueTime) {
+                        dueContainer.createDiv({
+                            text: task.metadata.dueTime,
+                            attr: {
+                                style: 'font-size: 0.8em; color: var(--text-faint); width: 100%; text-align: center; margin-top: 2px;'
+                            }
+                        });
+                    }
+                }
+                // --- End task rendering ---
             }
         }
+
+        renderAccordionSection.call(this, 'Due Today', 'today', dueToday);
+        renderAccordionSection.call(this, 'Due This Week', 'week', dueThisWeek);
+        renderAccordionSection.call(this, 'All Other Tasks', 'later', dueLater);
     }
 
     // Proper class method for getting all todos
@@ -1598,6 +1637,38 @@ export class CalendarView extends ItemView {
         }
     }
     // --- End Step 3 ---
+
+    // --- New method for recurring todo completion ---
+    async updateRecurringTodoCompletion(filePath: string, instanceDate: string, completed: boolean) {
+        const file = this.app.vault.getAbstractFileByPath(filePath);
+        if (!(file instanceof TFile)) {
+            new Notice("Error: Could not find original task file.");
+            return;
+        }
+
+        try {
+            await this.app.fileManager.processFrontMatter(file, (fm) => {
+                let completedDates = fm.completedDates || [];
+                if (!Array.isArray(completedDates)) {
+                    completedDates = [];
+                }
+
+                const dateExists = completedDates.includes(instanceDate);
+
+                if (completed && !dateExists) {
+                    completedDates.push(instanceDate);
+                } else if (!completed && dateExists) {
+                    completedDates = completedDates.filter((d: string) => d !== instanceDate);
+                }
+                fm.completedDates = completedDates;
+                delete fm.completed; // Remove the old global completed flag
+            });
+            new Notice(`Task for ${instanceDate} ${completed ? 'marked as complete' : 'marked as incomplete'}.`);
+        } catch (error) {
+            console.error("Error updating recurring todo completion:", error);
+            throw new Error('Failed to update recurring todo completion status in file.');
+        }
+    }
 
     // --- Step 5: Add handler for when a todo is dropped ---
     async handleTodoDrop(dropInfo: any) {
@@ -1870,51 +1941,42 @@ class EventModal extends Modal {
                     .setValue(this.result.startRecur || (this.result.start?.substring(0,10) || ''))
                     .onChange(value => this.result.startRecur = value));
 
+            // Days of week
+            const daysOfWeekArr = this.result.daysOfWeek ?? [];
             const daysOuterSetting = new Setting(contentEl)
-                .setName("Repeat on Days (Weekly)")
+                .setName("Repeat on Days")
                 .setDesc("Select days for weekly recurrence.");
-            const daysTogglesContainer = daysOuterSetting.controlEl.createDiv({ cls: 'obby-days-checkboxes-container' });
-            daysTogglesContainer.style.display = 'flex';
-            daysTogglesContainer.style.flexWrap = 'wrap';
-            daysTogglesContainer.style.gap = '10px';      
-            daysTogglesContainer.style.justifyContent = 'flex-start';
-            daysTogglesContainer.style.alignItems = 'center';
-
+            const daysGrid = daysOuterSetting.controlEl.createDiv({
+                cls: 'obby-days-checkboxes-grid',
+                attr: { style: 'display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 18px; margin-top: 10px; margin-bottom: 10px; align-items: center;' }
+            });
             this.daysOfWeekMap.forEach((dayName, index) => {
-                const dayWrapper = daysTogglesContainer.createDiv({cls: 'obby-day-checkbox-wrapper'});
-                dayWrapper.style.display = 'flex';
-                dayWrapper.style.alignItems = 'center';
-                dayWrapper.style.marginRight = '15px'; 
-                dayWrapper.style.marginBottom = '5px';
-
-                const checkboxId = `day-checkbox-${index}`;
-                const checkbox = dayWrapper.createEl('input', {
+                const cell = daysGrid.createDiv({ attr: { style: 'display: flex; align-items: center;' } });
+                const checkboxId = `task-day-checkbox-${index}`;
+                const checkbox = cell.createEl('input', {
                     type: 'checkbox',
-                    attr: { id: checkboxId }
+                    attr: { id: checkboxId, style: 'margin-right: 6px;' }
                 });
-                checkbox.checked = this.result.daysOfWeek?.includes(index) || false;
+                checkbox.checked = daysOfWeekArr.includes(index);
                 checkbox.onchange = (event) => {
-                    const checked = (event.target as HTMLInputElement).checked;
                     if (!this.result.daysOfWeek) this.result.daysOfWeek = [];
+                    const checked = (event.target as HTMLInputElement).checked;
                     if (checked) {
                         if (!this.result.daysOfWeek.includes(index)) this.result.daysOfWeek.push(index);
                     } else {
-                        this.result.daysOfWeek = this.result.daysOfWeek.filter(d => d !== index);
+                        this.result.daysOfWeek = this.result.daysOfWeek.filter((d: number) => d !== index);
                     }
-                    this.result.daysOfWeek.sort((a,b) => a-b); 
+                    this.result.daysOfWeek.sort((a: number, b: number) => a - b);
                 };
-
-                dayWrapper.createEl('label', { text: dayName, cls: 'obby-day-label', attr: { for: checkboxId } });
-                checkbox.style.marginRight = '5px'; 
+                cell.createEl('label', { text: dayName, attr: { for: checkboxId, style: 'font-size: 1em; font-weight: 400;' } });
             });
-            
+            // End date
             new Setting(contentEl)
-                .setName("Recurrence End Date (Optional)")
-                .setDesc("Date the recurrence pattern ends. Leave blank to repeat indefinitely.")
+                .setName("End Recurrence (Optional)")
                 .addText(text => text
                     .setPlaceholder("YYYY-MM-DD")
                     .setValue(this.result.endRecur || '')
-                    .onChange(value => this.result.endRecur = value || undefined));
+                    .onChange(value => this.result.endRecur = value || ''));
         }
         contentEl.createEl('hr');
 
@@ -2030,179 +2092,246 @@ class TaskModal extends Modal {
     onSubmit: () => void;
     calendarFolders: string[];
     filePath?: string; // Add filePath to track the task being edited
-    existingTask?: { title: string, description?: string, due?: string, dueTime?: string, priority?: string, folder?: string };
+    existingTask?: { title: string, description?: string, due?: string, dueTime?: string, priority?: string, folder?: string, isRecurring?: boolean, daysOfWeek?: number[], startRecur?: string, endRecur?: string };
+    // Recurrence state
+    isRecurring: boolean = false;
+    daysOfWeek: number[] = [];
+    startRecur: string = '';
+    endRecur: string = '';
 
-    constructor(app: App, plugin: MyPlugin, calendarFolders: string[], onSubmit: () => void, filePath?: string, existingTask?: { title: string, description?: string, due?: string, dueTime?: string, priority?: string, folder?: string }) {
+    daysOfWeekMap = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+    constructor(app: App, plugin: MyPlugin, calendarFolders: string[], onSubmit: () => void, filePath?: string, existingTask?: { title: string, description?: string, due?: string, dueTime?: string, priority?: string, folder?: string, isRecurring?: boolean, daysOfWeek?: number[], startRecur?: string, endRecur?: string }) {
         super(app);
         this.plugin = plugin;
         this.calendarFolders = calendarFolders;
         this.onSubmit = onSubmit;
         this.filePath = filePath;
         this.existingTask = existingTask;
+        // Load recurrence if editing
+        if (existingTask) {
+            this.isRecurring = !!existingTask.isRecurring;
+            this.daysOfWeek = existingTask.daysOfWeek || [];
+            this.startRecur = existingTask.startRecur || '';
+            this.endRecur = existingTask.endRecur || '';
+        }
     }
 
     onOpen() {
         const { contentEl } = this;
         contentEl.empty();
-        const headerRow = contentEl.createDiv();
-        headerRow.style.display = 'flex';
-        headerRow.style.alignItems = 'center';
-        headerRow.style.justifyContent = 'space-between';
-        headerRow.style.marginBottom = '12px';
-        headerRow.style.marginTop = '12px';
-        headerRow.createEl('h2', { text: this.filePath ? 'Edit Todo' : 'Add New Todo', attr: { style: 'margin: 0;' } });
-        // Add delete icon if editing
-        if (this.filePath) {
-            const deleteBtn = headerRow.createEl('button', {
-                attr: {
-                    style: 'background: none; border: none; cursor: pointer; padding: 4px; margin-left: 8px;'
-                }
-            });
-            deleteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>`;
-            deleteBtn.title = 'Delete task';
-            deleteBtn.onclick = async (e) => {
-                e.preventDefault();
-                if (confirm('Are you sure you want to delete this task?')) {
-                    const file = this.app.vault.getAbstractFileByPath(this.filePath!);
-                    if (file instanceof TFile) {
-                        await this.app.vault.delete(file);
-                        new Notice('Task deleted.');
-                        // Wait for metadata cache to update, then refresh the list
-                        const refresh = () => {
-                            this.app.metadataCache.off('resolved', refresh);
-                            this.onSubmit();
-                        };
-                        this.app.metadataCache.on('resolved', refresh);
-                        this.close();
-                    }
-                }
-            };
-        }
+        contentEl.createEl('h2', { text: this.filePath ? 'Edit Todo' : 'Add New Todo' });
+
         // Title
         const titleInput = contentEl.createEl('input', { type: 'text', attr: { placeholder: 'Task title', style: 'width: 100%; margin-bottom: 8px;' } });
         if (this.existingTask?.title) titleInput.value = this.existingTask.title;
+
         // Description
         const descInput = contentEl.createEl('textarea', { attr: { placeholder: 'Description', style: 'width: 100%; margin-bottom: 8px; min-height: 40px;' } });
         if (this.existingTask?.description) descInput.value = this.existingTask.description;
-        // Due date
-        const dateLabel = contentEl.createEl('span', { text: 'Due date', attr: { style: 'font-size: 0.85em; color: var(--text-muted); margin-bottom: 2px; display: block;' } });
+
+        // Date field (Due Date or Start Date)
+        const dateLabel = contentEl.createEl('span', { text: this.isRecurring ? 'Start Date' : 'Due Date' });
         const dateInput = contentEl.createEl('input', { type: 'date', attr: { style: 'width: 100%; margin-bottom: 8px;' } });
-        if (this.existingTask?.due) dateInput.value = this.existingTask.due;
-        // Due time
-        const timeLabel = contentEl.createEl('span', { text: 'Due time (optional)', attr: { style: 'font-size: 0.85em; color: var(--text-muted); margin-bottom: 2px; display: block;' } });
-        const timeInput = contentEl.createEl('input', { type: 'time', attr: { style: 'width: 100%; margin-bottom: 8px;' } });
-        if (this.existingTask?.dueTime) timeInput.value = this.existingTask.dueTime;
-        // Always show the calendar picker on click or focus (if supported)
-        const showCalendarPicker = (e: Event) => {
-            const input = dateInput as HTMLInputElement & { showPicker?: () => void };
-            if (input.showPicker) {
-                input.showPicker();
+        if (this.isRecurring) {
+            dateInput.value = this.startRecur || this.existingTask?.startRecur || '';
+        } else {
+            dateInput.value = this.existingTask?.due || '';
+        }
+        dateInput.onchange = () => {
+            if (this.isRecurring) {
+                this.startRecur = dateInput.value;
+            } else {
+                // For one-time tasks
             }
         };
-        dateInput.addEventListener('click', showCalendarPicker);
-        dateInput.addEventListener('focus', showCalendarPicker);
+        // Always open date picker on focus/pointerdown if supported
+        const openDatePicker = (e: Event) => {
+            if (dateInput.showPicker) {
+                e.preventDefault();
+                dateInput.showPicker();
+            }
+        };
+        dateInput.addEventListener('focus', openDatePicker);
+        dateInput.addEventListener('pointerdown', openDatePicker);
+
+        // Due time
+        const timeInput = contentEl.createEl('input', { type: 'time', attr: { placeholder: 'Time (optional)', style: 'width: 100%; margin-bottom: 8px;' } });
+        if (this.existingTask?.dueTime) timeInput.value = this.existingTask.dueTime;
+
         // Priority
-        const priorityLabel = contentEl.createEl('span', { text: 'Priority', attr: { style: 'font-size: 0.85em; color: var(--text-muted); margin-bottom: 2px; display: block;' } });
         const prioritySelect = contentEl.createEl('select', { attr: { style: 'width: 100%; margin-bottom: 8px;' } });
-        ["None", "Low", "Medium", "High"].forEach(p => {
+        ["None", "Low", "Medium", "High"].forEach((p: string) => {
             const opt = document.createElement('option');
             opt.value = p.toLowerCase();
             opt.text = p;
             prioritySelect.appendChild(opt);
         });
         if (this.existingTask?.priority) prioritySelect.value = this.existingTask.priority;
+
         // Folder
-        const folderLabel = contentEl.createEl('span', { text: 'Folder', attr: { style: 'font-size: 0.85em; color: var(--text-muted); margin-bottom: 2px; display: block;' } });
         const folderSelect = contentEl.createEl('select', { attr: { style: 'width: 100%; margin-bottom: 16px;' } });
-        this.calendarFolders.forEach(folder => {
+        this.calendarFolders.forEach((folder: string) => {
             const opt = document.createElement('option');
             opt.value = folder;
             opt.text = folder;
             folderSelect.appendChild(opt);
         });
         if (this.existingTask?.folder) folderSelect.value = this.existingTask.folder;
-        // Add/Update button
-        const addBtn = contentEl.createEl('button', { 
-            text: this.filePath ? 'Update task' : 'Add task', 
-            attr: { 
-                style: 'width: 100%; padding: 10px 0; border-radius: 4px; border: none; background: var(--interactive-accent); color: var(--text-on-accent); font-weight: bold; cursor: pointer; font-size: 1em;' 
-            } 
+
+        // Recurrence Toggle
+        new Setting(contentEl)
+            .setName("Enable Recurrence")
+            .addToggle(toggle => {
+                toggle.setValue(this.isRecurring)
+                    .onChange(value => {
+                        this.isRecurring = value;
+                        // Only show/hide recurrence fields and update label, do not re-render modal
+                        recurrenceFieldsWrapper.style.display = value ? '' : 'none';
+                        dateLabel.textContent = value ? 'Start Date' : 'Due Date';
+                    });
+            });
+
+        // Recurrence Options Wrapper (hidden if not recurring)
+        const recurrenceFieldsWrapper = contentEl.createDiv({ attr: { style: this.isRecurring ? '' : 'display: none;' } });
+        // Days of week
+        const daysOuterSetting = new Setting(recurrenceFieldsWrapper)
+            .setName("Repeat on Days")
+            .setDesc("Select days for weekly recurrence.");
+        const daysGrid = daysOuterSetting.controlEl.createDiv({
+            cls: 'obby-days-checkboxes-grid',
+            attr: { style: 'display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 18px; margin-top: 10px; margin-bottom: 10px; align-items: center;' }
         });
-        addBtn.disabled = true;
-        // Enable/disable button
-        const updateBtn = () => {
-            addBtn.disabled = !(titleInput.value.trim() && folderSelect.value);
+        this.daysOfWeekMap.forEach((dayName, index) => {
+            const cell = daysGrid.createDiv({ attr: { style: 'display: flex; align-items: center;' } });
+            const checkboxId = `task-day-checkbox-${index}`;
+            const checkbox = cell.createEl('input', {
+                type: 'checkbox',
+                attr: { id: checkboxId, style: 'margin-right: 6px;' }
+            });
+            checkbox.checked = this.daysOfWeek.includes(index);
+            checkbox.onchange = (event) => {
+                const checked = (event.target as HTMLInputElement).checked;
+                if (checked) {
+                    if (!this.daysOfWeek.includes(index)) this.daysOfWeek.push(index);
+                } else {
+                    this.daysOfWeek = this.daysOfWeek.filter(d => d !== index);
+                }
+                this.daysOfWeek.sort((a,b) => a-b);
+            };
+            cell.createEl('label', { text: dayName, attr: { for: checkboxId, style: 'font-size: 1em; font-weight: 400;' } });
+        });
+        // End date
+        const endDateLabel = recurrenceFieldsWrapper.createEl('span', { text: 'End Recurrence (Optional)' });
+        const endDateInput = recurrenceFieldsWrapper.createEl('input', { type: 'date', attr: { style: 'width: 100%; margin-bottom: 8px;' } });
+        endDateInput.value = this.endRecur || '';
+        endDateInput.onchange = () => { this.endRecur = endDateInput.value || ''; };
+        // Always open date picker on focus/pointerdown if supported
+        const openEndDatePicker = (e: Event) => {
+            if (endDateInput.showPicker) {
+                e.preventDefault();
+                endDateInput.showPicker();
+            }
         };
-        titleInput.addEventListener('input', updateBtn);
-        folderSelect.addEventListener('change', updateBtn);
-        updateBtn();
-        // Add/Update logic
+        endDateInput.addEventListener('focus', openEndDatePicker);
+        endDateInput.addEventListener('pointerdown', openEndDatePicker);
+
+        const addBtn = contentEl.createEl('button', {
+            text: this.filePath ? 'Update' : 'Add Task',
+            attr: {
+                style: 'width: 100%; padding: 10px 0; border-radius: 4px; border: none; background: var(--interactive-accent); color: var(--text-on-accent); font-weight: bold; cursor: pointer; font-size: 1em;'
+            }
+         });
+
+        if (this.filePath) {
+            const deleteBtn = contentEl.createEl('button', {
+                text: 'Delete Task',
+                attr: {
+                    style: 'width: 100%; padding: 10px 0; border-radius: 4px; border: 1px solid var(--text-error); background: transparent; color: var(--text-error); font-weight: bold; cursor: pointer; font-size: 1em; margin-top: 10px;'
+                }
+            });
+            deleteBtn.onclick = async () => {
+                if (confirm('Are you sure you want to delete this task? This cannot be undone.')) {
+                    try {
+                        const file = this.app.vault.getAbstractFileByPath(this.filePath!);
+                        if (file) {
+                            await this.app.vault.delete(file);
+                            new Notice('Task deleted.');
+                            this.onSubmit();
+                            this.close();
+                        }
+                    } catch (e: any) {
+                        new Notice(`Error deleting task: ${e.message}`);
+                    }
+                }
+            };
+        }
+
         addBtn.onclick = async () => {
+            if (this.isRecurring && (!dateInput.value || this.daysOfWeek.length === 0)) {
+                new Notice("Recurring tasks require a start date and at least one day of the week.");
+                return;
+            }
+
             const title = titleInput.value.trim();
-            if (!title || !folderSelect.value) return;
+            if (!title) {
+                new Notice("Title is required.");
+                return;
+            }
+
             const description = descInput.value.trim();
-            const dueDate = dateInput.value;
+            const dateVal = dateInput.value;
             const dueTime = timeInput.value;
             const priority = prioritySelect.value;
             const selectedFolder = folderSelect.value;
-            // Ensure todos subfolder exists
             const todosFolderPath = `${selectedFolder}/todos`;
-            let todosFolder = this.app.vault.getAbstractFileByPath(todosFolderPath);
-            if (!todosFolder) {
-                try {
+
+            try {
+                if (!this.app.vault.getAbstractFileByPath(todosFolderPath)) {
                     await this.app.vault.createFolder(todosFolderPath);
-                    new Notice(`Created todos folder: ${todosFolderPath}`);
-                } catch (e: any) {
-                    new Notice(`Error creating todos folder: ${e.message}`);
-                    return;
                 }
+            } catch (e) {
+                new Notice(`Error creating folder: ${e.message}`);
+                return;
             }
-            // Create or update task file
-            const sanitizedTitle = title.replace(/[\\/:*?"<>|]/g, "");
-            let baseFilename = `${todosFolderPath}/${sanitizedTitle}`;
-            let filename = `${baseFilename}.md`;
-            let counter = 0;
-            while (this.app.vault.getAbstractFileByPath(filename) && filename !== this.filePath) {
-                counter++;
-                filename = `${baseFilename}-${counter}.md`;
-            }
+
             let fileContent = '---\n';
             fileContent += `title: ${title}\n`;
-            if (description) fileContent += `description: ${description.replace(/\n/g, " ")}\n`;
-            if (dueDate) fileContent += `due: ${dueDate}\n`;
+            if (description) fileContent += `description: "${description.replace(/"/g, '\\"')}"\n`;
             if (dueTime) fileContent += `dueTime: ${dueTime}\n`;
-            if (priority && priority !== "none") fileContent += `priority: ${priority}\n`;
-            fileContent += `completed: false\n`;
+            if (priority && priority.toLowerCase() !== 'none') fileContent += `priority: ${priority}\n`;
+            
+            if (this.isRecurring) {
+                fileContent += `isRecurring: true\n`;
+                fileContent += `daysOfWeek: [${this.daysOfWeek.join(',')}]\n`;
+                if (dateVal) {
+                    fileContent += `startRecur: ${dateVal}\n`;
+                }
+                if (this.endRecur) fileContent += `endRecur: ${this.endRecur}\n`;
+                // No 'completed' flag for the template
+            } else {
+                fileContent += `completed: false\n`; // Only for non-recurring
+                if (dateVal) {
+                    fileContent += `due: ${dateVal}\n`;
+                }
+            }
             fileContent += '---\n\n';
-            fileContent += description ? description : '';
+            if (description) fileContent += description;
+
+            const sanitizedTitle = title.replace(/[\\/:*?"<>|]/g, "");
+            const filename = this.filePath || `${todosFolderPath}/${sanitizedTitle}.md`;
+
             try {
-                if (this.filePath && this.filePath !== filename) {
-                    // If the file is being moved to a new location, delete the old one first, then create the new file
-                    const oldFile = this.app.vault.getAbstractFileByPath(this.filePath);
-                    if (oldFile instanceof TFile) {
-                        await this.app.vault.delete(oldFile);
-                    }
-                    await this.app.vault.create(filename, fileContent);
-                } else if (this.filePath) {
-                    // Update existing file
-                    const file = this.app.vault.getAbstractFileByPath(this.filePath);
-                    if (file instanceof TFile) {
-                        await this.app.vault.modify(file, fileContent);
-                    }
+                if (this.filePath) {
+                    await this.app.vault.modify(this.app.vault.getAbstractFileByPath(this.filePath) as TFile, fileContent);
                 } else {
-                    // Create new file
                     await this.app.vault.create(filename, fileContent);
                 }
-                new Notice(this.filePath ? `Task '${title}' updated.` : `Task '${title}' created.`);
-                // Wait for metadata cache to update, then refresh the list
-                const refresh = () => {
-                    this.app.metadataCache.off('resolved', refresh);
-                    this.onSubmit();
-                };
-                this.app.metadataCache.on('resolved', refresh);
+                new Notice(`Task '${title}' saved.`);
+                this.onSubmit();
                 this.close();
             } catch (e: any) {
-                new Notice(`Error ${this.filePath ? 'updating' : 'creating'} task: ${e.message}`);
+                new Notice(`Error saving task: ${e.message}`);
             }
         };
     }

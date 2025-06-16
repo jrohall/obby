@@ -1,4 +1,4 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, TextComponent, ButtonComponent, ColorComponent } from 'obsidian';
+import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, TextComponent, ButtonComponent, ColorComponent, FuzzySuggestModal } from 'obsidian';
 import { CalendarView, CALENDAR_VIEW_TYPE } from "./calendar-view";
 
 // Define the structure for individual calendar folder settings
@@ -203,6 +203,120 @@ class SampleModal extends Modal {
 	}
 }
 
+class FolderPathSuggestModal extends FuzzySuggestModal<string> {
+	folderPaths: string[];
+	onChoose: (folder: string) => void;
+	constructor(app: App, folderPaths: string[], onChoose: (folder: string) => void) {
+		super(app);
+		this.folderPaths = folderPaths;
+		this.onChoose = onChoose;
+	}
+	getItems(): string[] {
+		return this.folderPaths;
+	}
+	getItemText(item: string): string {
+		return item;
+	}
+	onChooseItem(item: string): void {
+		this.onChoose(item);
+	}
+}
+
+class InlineFolderSuggest {
+	inputEl: HTMLInputElement;
+	suggestions: string[];
+	vaultFolders: string[];
+	dropdown: HTMLUListElement | null = null;
+	onChoose: (folder: string) => void;
+	constructor(inputEl: HTMLInputElement, vaultFolders: string[], onChoose: (folder: string) => void) {
+		this.inputEl = inputEl;
+		this.vaultFolders = vaultFolders;
+		this.onChoose = onChoose;
+		this.suggestions = [];
+		this.inputEl.addEventListener('input', this.onInput.bind(this));
+		this.inputEl.addEventListener('keydown', this.onKeyDown.bind(this));
+		this.inputEl.addEventListener('blur', this.onBlur.bind(this));
+	}
+	onInput() {
+		const value = this.inputEl.value.toLowerCase();
+		this.suggestions = this.vaultFolders.filter(f => f.toLowerCase().includes(value));
+		this.showDropdown();
+	}
+	showDropdown() {
+		this.removeDropdown();
+		if (this.suggestions.length === 0) return;
+		this.dropdown = document.createElement('ul');
+		this.dropdown.className = 'obby-folder-suggest-dropdown';
+		this.dropdown.style.position = 'absolute';
+		this.dropdown.style.zIndex = '1000';
+		this.dropdown.style.background = 'var(--background-primary)';
+		this.dropdown.style.border = '1px solid var(--background-modifier-border)';
+		this.dropdown.style.margin = '0';
+		this.dropdown.style.padding = '0';
+		this.dropdown.style.listStyle = 'none';
+		this.dropdown.style.width = this.inputEl.offsetWidth + 'px';
+		this.dropdown.style.maxHeight = '180px';
+		this.dropdown.style.overflowY = 'auto';
+		this.dropdown.style.fontSize = '1em';
+		this.dropdown.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+		this.suggestions.forEach((s, i) => {
+			const li = document.createElement('li');
+			li.textContent = s;
+			li.style.padding = '4px 8px';
+			li.style.cursor = 'pointer';
+			li.onmousedown = (e) => {
+				e.preventDefault();
+				this.choose(s);
+			};
+			this.dropdown!.appendChild(li);
+		});
+		const rect = this.inputEl.getBoundingClientRect();
+		this.dropdown.style.left = rect.left + window.scrollX + 'px';
+		this.dropdown.style.top = rect.bottom + window.scrollY + 'px';
+		document.body.appendChild(this.dropdown);
+	}
+	onKeyDown(e: KeyboardEvent) {
+		if (!this.dropdown) return;
+		const items = Array.from(this.dropdown.querySelectorAll('li'));
+		const active = this.dropdown.querySelector('.active');
+		let idx = items.indexOf(active as HTMLLIElement);
+		if (e.key === 'ArrowDown') {
+			e.preventDefault();
+			if (idx < items.length - 1) idx++;
+			else idx = 0;
+			items.forEach(li => li.classList.remove('active'));
+			items[idx].classList.add('active');
+		} else if (e.key === 'ArrowUp') {
+			e.preventDefault();
+			if (idx > 0) idx--;
+			else idx = items.length - 1;
+			items.forEach(li => li.classList.remove('active'));
+			items[idx].classList.add('active');
+		} else if (e.key === 'Enter') {
+			if (idx >= 0) {
+				e.preventDefault();
+				this.choose(items[idx].textContent!);
+			}
+		} else if (e.key === 'Escape') {
+			this.removeDropdown();
+		}
+	}
+	onBlur() {
+		setTimeout(() => this.removeDropdown(), 100);
+	}
+	choose(folder: string) {
+		this.inputEl.value = folder;
+		this.onChoose(folder);
+		this.removeDropdown();
+	}
+	removeDropdown() {
+		if (this.dropdown) {
+			this.dropdown.remove();
+			this.dropdown = null;
+		}
+	}
+}
+
 class ObbyPluginSettingTab extends PluginSettingTab {
 	plugin: MyPlugin;
 
@@ -223,26 +337,31 @@ class ObbyPluginSettingTab extends PluginSettingTab {
 			containerEl.createEl('p', { text: 'No calendar folders configured.' });
 		}
 
+		// Get all folder paths in the vault for suggestions
+		const allFolders = this.app.vault.getAllLoadedFiles().filter(f => f instanceof TFolder) as TFolder[];
+		const allFolderPaths = allFolders.map(f => f.path);
+
 		this.plugin.settings.calendarFolderSettings.forEach((config, index) => {
 			const settingItem = new Setting(containerEl)
-				.addText(text => text
-					.setValue(config.path)
-					.setPlaceholder('Folder path (e.g., Calendar/Work)')
-					.onChange(async (value) => {
-						this.plugin.settings.calendarFolderSettings[index].path = value.trim();
-						await this.plugin.saveSettings();
-						// No need to call this.display() here if saveSettings triggers refetch and UI update
-						// However, if direct manipulation is complex, this.display() ensures consistency.
-						// For now, let's assume saveSettings handles necessary updates or rely on Obsidian's reactivity.
-						// If issues arise, uncommenting this.display() might be needed.
-						// this.display(); 
-					}))
+				.addText(text => {
+					text.setValue(config.path)
+						.setPlaceholder('Folder path (e.g., Calendar/Work)')
+						.onChange(async (value) => {
+							this.plugin.settings.calendarFolderSettings[index].path = value.trim();
+							await this.plugin.saveSettings();
+						});
+					// Inline autocomplete
+					new InlineFolderSuggest(text.inputEl, allFolderPaths, (chosen) => {
+						text.setValue(chosen);
+						this.plugin.settings.calendarFolderSettings[index].path = chosen;
+						this.plugin.saveSettings();
+					});
+				})
 				.addColorPicker(colorPicker => colorPicker
 					.setValue(config.color)
 					.onChange(async (value) => {
 						this.plugin.settings.calendarFolderSettings[index].color = value;
 						await this.plugin.saveSettings();
-						// this.display();
 					}))
 				.addExtraButton(button => button
 					.setIcon("trash")
@@ -252,10 +371,8 @@ class ObbyPluginSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 						this.display(); // Refresh UI after removal
 					}));
-			
-			// Adjust styling to prevent nameEl from taking up space if not used
-			settingItem.nameEl.remove(); // Remove the default name element container
-			settingItem.controlEl.style.width = '100%'; // Make control element take full width
+			settingItem.nameEl.remove();
+			settingItem.controlEl.style.width = '100%';
 			settingItem.controlEl.style.justifyContent = 'space-between';
 		});
 		
@@ -272,6 +389,10 @@ class ObbyPluginSettingTab extends PluginSettingTab {
 		addFolderSetting.addText(text => {
 			newPathInput = text;
 			text.setPlaceholder("e.g., Calendar/Personal");
+			// Inline autocomplete
+			new InlineFolderSuggest(text.inputEl, allFolderPaths, (chosen) => {
+				newPathInput.setValue(chosen);
+			});
 		})
 		.addColorPicker(picker => {
 			newColorInput = picker;
@@ -293,7 +414,6 @@ class ObbyPluginSettingTab extends PluginSettingTab {
 					new Notice("Folder path cannot be empty.");
 				}
 			}));
-		// Adjust styling for add folder section
 		addFolderSetting.nameEl.remove();
 		addFolderSetting.controlEl.style.width = '100%';
 		addFolderSetting.controlEl.style.justifyContent = 'space-between';
@@ -348,3 +468,8 @@ class ObbyPluginSettingTab extends PluginSettingTab {
 			});
 	}
 }
+
+/* Add minimal CSS for the dropdown */
+const style = document.createElement('style');
+style.textContent = `.obby-folder-suggest-dropdown li.active { background: var(--background-modifier-hover); }`;
+document.head.appendChild(style);
